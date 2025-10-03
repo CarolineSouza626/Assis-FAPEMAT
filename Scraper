@@ -1,0 +1,206 @@
+import os
+import re
+import time
+import csv
+import logging
+from urllib.parse import urljoin, urlparse
+from pathlib import Path
+
+import requests
+from bs4 import BeautifulSoup
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# Configurações
+BASE = "https://www.fapemat.mt.gov.br"
+CATEGORIES = {
+    "Abertos": "73983336",
+    "Encerrados": "73983347",
+    "Resultado": "73983339",
+}
+OUT_DIR = Path("editais")
+OUT_DIR.mkdir(exist_ok=True)
+
+CSV_PATH = Path("editais_fapemat.csv")
+RATE_LIMIT = 1.0  # segundos entre downloads
+HEADLESS = True
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+session = requests.Session()
+session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+
+def make_driver():
+    """Cria o driver Selenium."""
+    opts = Options()
+    if HEADLESS:
+        opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1200,1000")
+    opts.add_argument("--lang=pt-BR")
+    driver = webdriver.Chrome(options=opts)
+    driver.set_page_load_timeout(60)
+    return driver
+
+
+def safe_filename(s: str) -> str:
+    """Normaliza nomes de arquivos."""
+    s = re.sub(r"[^\w\s\-\.()]", "_", s)
+    s = re.sub(r"\s+", "_", s).strip("_")
+    return s[:240]
+
+
+def download_file(url: str, out_dir: Path, prefix: str = "") -> Path:
+    """Baixa arquivo e salva localmente."""
+    name = os.path.basename(urlparse(url).path) or "download"
+    if prefix:
+        name = f"{safe_filename(prefix)[:50]}_{name}"
+    name = safe_filename(name)
+    local = out_dir / name
+    if local.exists() and local.stat().st_size > 0:
+        logging.info(f"Já existe: {local}")
+        return local
+
+    logging.info(f"  Baixando {url}")
+    for attempt in range(3):
+        try:
+            with session.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(local, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        f.write(chunk)
+            time.sleep(RATE_LIMIT)
+            return local
+        except Exception as e:
+            logging.warning(f"Tentativa {attempt+1} falhou para {url}: {e}")
+            time.sleep(3)
+
+    raise RuntimeError(f"Falha ao baixar {url}")
+
+
+def extract_list_items(driver, url):
+    """Extrai lista de editais de uma categoria ou subcategoria (ano)."""
+    driver.get(url)
+    time.sleep(2)
+
+    html = driver.page_source
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    # Caso 1: formato usado em Abertos/Resultado
+    for a in soup.select(".asset-title a"):
+        title = a.get_text(strip=True)
+        href = urljoin(BASE, a["href"])
+        items.append((title, href))
+
+    # Caso 2: formato usado em Encerrados/ano (cards cinza)
+    for a in soup.select("a[href*='/pt/w/']"):
+        title = a.get_text(strip=True)
+        href = a.get("href")
+        if href:
+            href = urljoin(BASE, href)
+            items.append((title, href))
+
+    return items, soup
+
+
+def extract_pdf_links(driver, page_url):
+    """Extrai links de anexos em uma página de edital."""
+    driver.get(page_url)
+    WebDriverWait(driver, 15).until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href]"))
+    )
+    html = driver.page_source
+    soup = BeautifulSoup(html, "html.parser")
+
+    links = []
+    for a in soup.select("a[href]"):
+        href = a["href"]
+        if any(ext in href.lower() for ext in [".pdf", ".doc", ".docx", ".xls", ".xlsx"]):
+            links.append(urljoin(BASE, href))
+        elif "/documents/" in href.lower():
+            links.append(urljoin(BASE, href))
+    return list(dict.fromkeys(links)), soup
+
+
+def process_edital(driver, categoria, subcat, title, url, writer):
+    """Processa um edital individual: entra na página e baixa anexos."""
+    logging.info(f"➡️ Entrando no edital: {title} ({url})")
+    anexos, soup = extract_pdf_links(driver, url)
+
+    # Data de publicação (se existir)
+    data_pub = ""
+    for sel in [".edital_data", ".data", "time", ".date"]:
+        el = soup.select_one(sel)
+        if el:
+            data_pub = el.get_text(strip=True)
+            break
+
+    local_files = []
+    for a in anexos:
+        try:
+            local = download_file(a, OUT_DIR, prefix=title)
+            local_files.append(str(local))
+        except Exception as e:
+            logging.error(f"Erro ao baixar {a}: {e}")
+
+    writer.writerow([categoria, subcat or "", title, data_pub, url, ";".join(local_files)])
+    logging.info(f"✔ {title} ({len(local_files)} anexos)")
+
+
+def process_category(driver, cat_name, cat_id, writer):
+    """Processa uma categoria inteira (e subcategorias de ano em Encerrados)."""
+    url = f"{BASE}/pt/editais_1?categoryId={cat_id}"
+    logging.info(f"### Categoria: {cat_name} {url}")
+
+    items, soup = extract_list_items(driver, url)
+
+    if not items:
+        # Procurar subcategorias (anos em Encerrados)
+        subs = []
+        for a in soup.select("a[href*='categoryId=']"):
+            text = a.get_text(strip=True)
+            m = re.search(r"categoryId=(\d+)", a["href"])
+            if m:
+                subs.append((text, m.group(1)))
+
+        subs = list(dict.fromkeys(subs))
+        logging.info(f"Subcategorias encontradas ({cat_name}): {subs}")
+
+        for subname, subid in subs:
+            suburl = f"{BASE}/pt/editais_1?categoryId={subid}"
+            logging.info(f"➡️ Subcategoria {cat_name}/{subname} ({suburl})")
+
+            subitems, _ = extract_list_items(driver, suburl)
+            if not subitems:
+                logging.warning(f"Nenhum edital em {suburl}")
+            else:
+                for title, link in subitems:
+                    process_edital(driver, cat_name, subname, title, link, writer)
+    else:
+        # Categoria sem subcategorias (Abertos, Resultado)
+        for title, link in items:
+            process_edital(driver, cat_name, None, title, link, writer)
+
+
+def main():
+    driver = make_driver()
+    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Categoria", "Subcategoria", "Título", "Data", "URL", "Arquivos"])
+
+        for cat_name, cat_id in CATEGORIES.items():
+            process_category(driver, cat_name, cat_id, writer)
+
+    driver.quit()
+    logging.info(f"\n✅ Finalizado! PDFs em {OUT_DIR}/ e metadados em {CSV_PATH}")
+
+
+if __name__ == "__main__":
+    main()
