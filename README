@@ -1,0 +1,62 @@
+# 🤖 Assistente Virtual para Editais da FAPEMAT
+
+## 📚 Descrição
+O projeto **Assistente Virtual para Editais da FAPEMAT** tem como objetivo facilitar o acesso, a consulta e a compreensão de editais de fomento à pesquisa.  
+
+Por meio de técnicas de **RAG (Retrieval-Augmented Generation)** e interface em **linguagem natural**, a ferramenta permite que pesquisadores, estudantes e gestores obtenham informações rápidas e confiáveis diretamente dos documentos oficiais.  
+
+Diferente da leitura manual e da busca fragmentada, a assistente **centraliza e organiza os dados**, reduzindo tempo de pesquisa e aumentando a precisão no acompanhamento de prazos e oportunidades.
+
+---
+
+## 🎯 Objetivos
+- Facilitar o acesso a informações de editais da FAPEMAT.  
+- Permitir consultas em linguagem natural com respostas contextualizadas.  
+- Reduzir o tempo gasto na busca manual de informações.  
+- Aumentar a eficiência de pesquisadores e gestores no acompanhamento de prazos.  
+- Criar um modelo expansível para outras agências de fomento (FAPESP, CNPq, CAPES).  
+
+---
+
+## 🛠 Tecnologias Utilizadas
+- **RAG (Retrieval-Augmented Generation)** → motor de busca + IA generativa.  
+- **Python** → processamento e integração do sistema.  
+- **SQLite** → armazenamento e indexação dos editais.  
+- **Bibliotecas de NLP e scraping** → para extração e tratamento de dados.  
+- **Interface web/app** → interação com usuários (chat e filtros).  
+
+---
+
+## 👩‍🏫 Público-Alvo
+- Pesquisadores e professores do ensino superior.  
+- Estudantes de pós-graduação interessados em bolsas e auxílios.  
+- Gestores de projetos de pesquisa e inovação.  
+- Instituições de ensino e pesquisa que necessitam centralizar informações de editais.  
+
+---
+
+## 📊 Metodologia
+O desenvolvimento do projeto será realizado em etapas:  
+
+1. **Coleta e Organização de Dados**  
+   - Extração automática de editais da FAPEMAT.  
+   - Estruturação em banco de dados.  
+
+2. **Implementação do Motor de Busca com RAG**  
+   - Indexação de documentos.  
+   - Respostas fundamentadas em trechos oficiais dos editais.  
+
+3. **Construção da Interface**  
+   - Chat de perguntas e respostas em linguagem natural.  
+   - Filtros de busca por ano, área e tipo de edital.  
+
+4. **Validação com Usuários**  
+   - Testes com pesquisadores e estudantes.  
+   - Avaliação da precisão e utilidade das respostas.  
+
+---
+
+## 📈 Resultados Esperados
+- Redução do tempo médio para encontrar informações em editais.  
+- Maior clareza na compreensão dos documentos.  
+- Aumento da participação de pesquisadores em editais da FAPEMAT.  
